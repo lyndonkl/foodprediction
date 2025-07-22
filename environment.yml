@@ -1,0 +1,22 @@
+name: foodprediction
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pytorch=2.5.*
+  - numpy
+  - pandas
+  - scipy
+  - tqdm
+  - transformers
+  - sympy=1.13.1
+  - nltk
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - jupyter
+  - ipykernel
+  - networkx
+  - hyperopt 
