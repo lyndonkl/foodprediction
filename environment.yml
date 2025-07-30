@@ -16,7 +16,16 @@ dependencies:
   - scikit-learn
   - matplotlib
   - seaborn
+  - plotly
   - jupyter
   - ipykernel
   - networkx
-  - hyperopt 
+  - hyperopt
+  - pyyaml
+  - tensorboard
+  - pip
+  - pip:
+    - torch-geometric
+    - torch-scatter
+    - torch-cluster
+    - torch-spline-conv 

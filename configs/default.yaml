@@ -1,0 +1,76 @@
+# Default configuration for Food Metabolomics Graph Learning
+
+# Data Configuration
+data:
+  # Graph construction
+  molecule_embedding_dim: 512  # dreaMS embedding dimension
+  food_feature_dim: 64         # Nutritional features dimension
+  sample_feature_dim: 32       # Sample features dimension
+  nutrient_feature_dim: 32     # Nutrient features dimension
+  
+  # Data splits
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  
+  # Augmentation for GraphCL
+  node_drop_rate: 0.1
+  edge_drop_rate: 0.1
+  feature_mask_rate: 0.1
+
+# Model Configuration
+model:
+  # Heterogeneous GAT
+  hidden_dim: 256
+  num_layers: 3
+  num_heads: 8
+  dropout: 0.1
+  
+  # Node encoders
+  molecule_encoder_dim: 512
+  food_encoder_dim: 64
+  sample_encoder_dim: 32
+  nutrient_encoder_dim: 32
+  
+  # Multi-task heads
+  classification_dim: 128
+  nutrition_projection_dim: 128
+
+# Training Configuration
+training:
+  # GraphCL Pretraining
+  pretrain_epochs: 100
+  pretrain_lr: 0.001
+  pretrain_batch_size: 32
+  temperature: 0.1
+  
+  # Fine-tuning
+  finetune_epochs: 50
+  finetune_lr: 0.0001
+  finetune_batch_size: 16
+  
+  # Multi-task weights
+  classification_weight: 1.0
+  nutrition_weight: 0.5
+  molecule_weight: 0.3
+  
+  # Optimization
+  weight_decay: 0.0001
+  early_stopping_patience: 10
+
+# Evaluation Configuration
+evaluation:
+  # Metrics
+  k_neighbors: 10  # for k-NN purity
+  fidelity_threshold: 0.8
+  
+  # Visualization
+  plot_attention: true
+  plot_embeddings: true
+  plot_confusion_matrix: true
+
+# Inference Configuration
+inference:
+  batch_size: 32
+  confidence_threshold: 0.8
+  max_molecules_per_sample: 100 

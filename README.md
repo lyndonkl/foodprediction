@@ -1,147 +1,138 @@
-# Food Prediction: Graph-Based Learning Framework
+# Food Metabolomics Graph Learning
 
-A graph-based learning framework for analyzing multi-modal food and metabolomic data using Graph Neural Networks (GNNs).
+A Graph Neural Network (GNN) project for food metabolomics analysis, focusing on three core objectives:
+
+1. **Food Origin Prediction** – Identify the origin food of an unknown MS/MS spectrum sample
+2. **Salient Molecule Discovery** – Identify the most chemically informative molecules for classification
+3. **Nutrition-Aware Embeddings** – Learn embeddings of food types that reflect nutritional similarity
 
 ## Project Overview
 
-This project implements a heterogeneous graph-based machine learning system to:
-1. **Predict food origin** from unknown MS/MS spectral fingerprints
-2. **Organize food embeddings** by nutritional similarity for downstream analysis
+This project applies heterogeneous Graph Neural Networks to a rich, multi-modal food metabolomics dataset. The system uses a heterogeneous graph to model relationships among:
 
-The system leverages the relationships between molecular features (metabolites) and food samples to create a rich, interconnected graph structure that captures both chemical and nutritional properties.
+- **Molecules**: Unique MS/MS features with dreaMS embeddings
+- **Foods**: Distinct food categories with USDA nutritional data
+- **Samples**: Biological replicates with learnable features
+- **Nutrients**: Explicit nutrient concepts with learnable embeddings
 
-## Data Sources
+## Architecture
 
-The project uses three core datasets:
+### Graph Schema
+- **Node Types**: Molecule, Food, Sample, Nutrient
+- **Edge Types**: 
+  - `(Sample) --contains_molecule--> (Molecule)` with intensity
+  - `(Sample) --is_instance_of--> (Food)` (ground truth)
+  - `(Food) --has_nutrient--> (Nutrient)` with quantity
+  - `(Molecule) --is_similar_to--> (Molecule)` (optional)
 
-### 1. Metadata_500food.csv
-- **Purpose**: Central repository for food sample metadata
-- **Key Fields**:
-  - `filename`: Unique identifier for each food sample (e.g., P3_E8_G72464.mzML)
-  - `description` & `sample_type_common`: Human-readable food labels
-  - `ndb_number`: National Nutrient Database number for USDA linking
-  - Hierarchical ontology fields: `sample_type_group1`, `botanical_family`, etc.
+### Model Architecture
+- **Base Model**: Heterogeneous GAT with attention for interpretability
+- **Training**: Two-stage approach (GraphCL pretraining + multi-task fine-tuning)
+- **Features**: dreaMS embeddings for molecules, nutritional data for foods
 
-### 2. Untargeted_biomarkers_level5.csv
-- **Purpose**: Defines molecular feature to food relationships
-- **Structure**:
-  - `feature`: Unique numerical identifier for MS/MS spectral fingerprints
-  - `category`: Comma-separated list of food labels where the molecule is a predictive biomarker
-- **Key Insight**: These are high-signal, statistically validated relationships
+## Installation
 
-### 3. Feature Intensity Matrix
-- **Purpose**: Quantitative abundance data for molecular features in each food sample
-- **Structure**: Matrix where rows = molecular features, columns = food samples
-- **Use**: Provides edge weights for the graph structure
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd foodprediction
+   ```
 
-## Graph Architecture
+2. **Create and activate the conda environment**:
+   ```bash
+   conda env create -f environment.yml
+   conda activate foodprediction
+   ```
 
-The system constructs a heterogeneous graph with:
-
-### Node Types
-- **Molecule Nodes**: Each unique molecular feature with Spec2Vec embeddings
-- **Food Nodes**: Each food sample with nutritional feature vectors from USDA data
-
-### Edge Types
-- `('Molecule', 'found_in', 'Food')`: Primary predictive relationships
-- `('Food', 'contains', 'Molecule')`: Inverse edges for bidirectional message passing
-
-### Node Features
-- **Molecule Features**: Dense vector embeddings from MS/MS spectra (Spec2Vec)
-- **Food Features**: Nutritional profiles from USDA FoodData Central + ontological categories
-
-## Machine Learning Approach
-
-### Primary Architecture: Heterogeneous Graph Attention Network (HAN)
-- **Advantages**: Native handling of heterogeneous graphs, interpretable attention weights
-- **Use Case**: Best balance of performance and scientific insight
-
-### Alternative Architectures
-- **Graph Isomorphism Network (GIN)**: Maximum expressive power for food origin prediction
-- **Graph Diffusion Models**: Research-oriented approach for robust embeddings
-
-### Training Strategy: Two-Stage Learning
-1. **Self-Supervised Pre-training (GraphCL)**: Learn robust representations without labels
-2. **Multi-Task Fine-tuning**: Simultaneous food origin prediction and nutritional organization
+3. **Install dreaMS** (if not already installed):
+   ```bash
+   pip install dreams-embeddings
+   ```
 
 ## Project Structure
 
 ```
 foodprediction/
-├── data/                          # Core datasets
-│   ├── Metadata_500food.csv
-│   ├── Untargeted_biomarkers_level5.csv
-│   ├── featuretable_reformated - Kushal.csv
-│   └── FoodData_Central_csv_2025-04-24/  # USDA nutritional data
-├── docs/                          # Project documentation
-│   └── project-plan.md
-├── analysis/                      # Jupyter notebooks for exploration
-├── src/                          # Source code (to be implemented)
-├── environment.yml               # Conda environment specification
-└── README.md                     # This file
+├── src/
+│   ├── models/          # GNN and heads (GATConv layers + classifier + projection)
+│   ├── data/            # Graph construction logic (single graph)
+│   ├── train/           # Training pipeline (pretraining + fine-tuning stages)
+│   ├── eval/            # Metrics, explanations (faithfulness, stability, k-NN purity)
+│   └── utils/           # Utility functions
+├── notebooks/           # EDA, visualization, experimentation
+├── data/
+│   ├── raw/             # Raw metabolomics and nutritional data
+│   ├── processed/       # Processed data and features
+│   └── embeddings/      # dreaMS embeddings cache
+├── configs/             # Hyperparameters and configuration
+└── docs/                # Documentation and implementation plan
 ```
 
-## Setup Instructions
+## Quick Start
 
-### 1. Environment Setup
-```bash
-# Create conda environment
-conda env create -f environment.yml
+1. **Setup the environment** (see Installation above)
 
-# Activate environment
-conda activate foodprediction
+2. **Prepare your data**:
+   - Place MS/MS spectra in `data/raw/`
+   - Add nutritional data for foods
+   - Configure data paths in `configs/default.yaml`
 
-# Install PyTorch Geometric
-pip install torch-geometric
-```
+3. **Run the pipeline**:
+   ```python
+   from src.data import build_graph
+   from src.train import pretrain, finetune
+   from src.eval import evaluate
+   
+   # Build heterogeneous graph
+   graph = build_graph()
+   
+   # Pretrain with GraphCL
+   pretrained_model = pretrain(graph)
+   
+   # Fine-tune for multi-task learning
+   model = finetune(pretrained_model, graph)
+   
+   # Evaluate all objectives
+   results = evaluate(model, graph)
+   ```
 
-### 2. Data Preparation
-1. Ensure all CSV files are in the `data/` directory
-2. Download USDA FoodData Central dataset (if not already present)
-3. Run data exploration notebook: `jupyter notebook analysis/data_exploration.ipynb`
+## Configuration
 
-### 3. Development Workflow
-1. **Data Analysis**: Explore relationships between datasets
-2. **USDA Integration**: Link nutritional data using `ndb_number`
-3. **Graph Construction**: Build heterogeneous graph with PyTorch Geometric
-4. **Model Training**: Implement HAN with two-stage training
-5. **Evaluation**: Assess both prediction accuracy and nutritional organization
+Edit `configs/default.yaml` to customize:
+- Model hyperparameters (hidden dimensions, layers, attention heads)
+- Training parameters (learning rates, batch sizes, epochs)
+- Data processing settings (augmentation rates, feature dimensions)
+- Evaluation metrics and thresholds
+
+## Core Objectives
+
+### 1. Food Origin Prediction
+Predict the food source of unknown MS/MS spectra using the heterogeneous graph structure and attention mechanisms.
+
+### 2. Salient Molecule Discovery
+Identify the most important molecules for food classification using GAT attention weights and explainability techniques.
+
+### 3. Nutrition-Aware Embeddings
+Learn food embeddings that capture nutritional similarity, enabling nutrition-based food recommendations and analysis.
+
+## Implementation Plan
+
+The project follows a structured implementation approach with tickets for each phase:
+- **Phase 1**: Foundation (Project Setup, Data Processing, Graph Construction)
+- **Phase 2**: Model Development (GNN Model, GraphCL Pretraining, Multi-Task Fine-tuning)
+- **Phase 3**: Evaluation & Inference (Evaluation Metrics, Inference Pipeline)
+
+See `docs/tickets/` for detailed implementation tickets.
 
 ## Key Features
 
-- **Multi-Modal Integration**: Combines metabolomic, nutritional, and ontological data
-- **Interpretable AI**: Attention mechanisms provide biochemical insights
-- **Robust Embeddings**: Self-supervised pre-training for generalization
-- **Scalable Architecture**: Designed for large-scale food databases
-
-## Research Applications
-
-- **Food Authentication**: Identify food origin from spectral fingerprints
-- **Nutritional Analysis**: Discover foods with similar nutritional profiles
-- **Biochemical Discovery**: Understand molecular drivers of food identity
-- **Quality Control**: Detect adulteration or mislabeling in food products
-
-## Technical Stack
-
-- **Python 3.12**
-- **PyTorch 2.5** & **PyTorch Geometric**
-- **Pandas, NumPy, SciPy** for data manipulation
-- **Scikit-learn** for evaluation metrics
-- **Matplotlib, Seaborn** for visualization
-- **Spec2Vec** for molecular feature embeddings
-
-## Contributing
-
-This project follows a structured development approach:
-1. Follow the project plan in `docs/project-plan.md`
-2. Use minimal, clean code following functional programming principles
-3. Prioritize interpretability and scientific insight
-4. Maintain comprehensive documentation
+- **Heterogeneous Graph**: Models complex relationships between molecules, foods, samples, and nutrients
+- **dreaMS Integration**: Uses state-of-the-art molecule embeddings
+- **Attention Mechanism**: Provides interpretability for salient molecule discovery
+- **Multi-Task Learning**: Simultaneously optimizes for all three objectives
+- **GraphCL Pretraining**: Self-supervised learning for better representations
+- **Dynamic Inference**: Real-time processing of new metabolomics data
 
 ## License
 
-[Add your license information here]
-
-## Contact
-
-[Add your contact information here] 
+[Add your license information here] 
