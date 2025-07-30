@@ -338,8 +338,8 @@ class FoodMetabolomicsDataManager:
         Get molecule features including dreaMS embeddings.
         
         Args:
-            feature_id: Feature identifier
-            dreams_embeddings: DataFrame with dreaMS embeddings
+            feature_id: Feature identifier (e.g., '271', '4396')
+            dreams_embeddings: DataFrame with dreaMS embeddings indexed by Feature ID
             
         Returns:
             Dictionary with molecule features
@@ -347,13 +347,15 @@ class FoodMetabolomicsDataManager:
         if feature_id in self.molecule_features:
             return self.molecule_features[feature_id]
         
-        # Get dreaMS embedding for this feature
-        if feature_id in dreams_embeddings.index:
-            embedding = dreams_embeddings.loc[feature_id].to_dict()
+        # Get dreaMS embedding for this feature (convert to string for matching)
+        feature_id_str = str(feature_id)
+        if feature_id_str in dreams_embeddings.index:
+            embedding = dreams_embeddings.loc[feature_id_str].to_dict()
             molecule_features = {
                 'embedding': embedding,
                 'embedding_dim': len(embedding)
             }
+            logger.debug(f"Found dreaMS embedding for feature {feature_id}: {len(embedding)} dimensions")
         else:
             logger.warning(f"No dreaMS embedding found for feature {feature_id}")
             molecule_features = {}

@@ -96,6 +96,28 @@ def test_data_manager():
                 sample_features = data_manager.get_sample_features(first_sample)
                 if sample_features:
                     print(f"✓ Sample features for {first_sample}: food={sample_features.get('food_name', 'N/A')}")
+                    
+                    # Test molecule features if we have dreaMS embeddings
+                    try:
+                        from src.data.dreams_embeddings import DreaMSEmbeddingGenerator
+                        generator = DreaMSEmbeddingGenerator()
+                        mgf_path = Path("data/500_foods.mgf")
+                        
+                        if mgf_path.exists():
+                            dreams_embeddings = generator.generate_embeddings(mgf_path, force_regenerate=False)
+                            
+                            # Test molecule features for a few features from the sample
+                            molecule_intensities = sample_features.get('molecule_intensities', {})
+                            if molecule_intensities:
+                                test_features = list(molecule_intensities.keys())[:3]  # Test first 3 features
+                                for feature_id in test_features:
+                                    molecule_features = data_manager.get_molecule_features(feature_id, dreams_embeddings)
+                                    if molecule_features:
+                                        print(f"✓ Molecule features for {feature_id}: {molecule_features.get('embedding_dim', 0)} dimensions")
+                                    else:
+                                        print(f"⚠ No molecule features for {feature_id}")
+                    except Exception as e:
+                        print(f"⚠ dreaMS integration test skipped: {e}")
         
         return True
         
