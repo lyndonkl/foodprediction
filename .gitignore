@@ -40,6 +40,9 @@ data/embeddings/*
 !data/processed/.gitkeep
 !data/embeddings/.gitkeep
 
+# External repositories
+DreaMS/
+
 # Model checkpoints
 checkpoints/
 models/
