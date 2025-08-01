@@ -42,6 +42,7 @@ data/embeddings/*
 
 # External repositories
 DreaMS/
+DreaMS/*
 
 # Model checkpoints
 checkpoints/

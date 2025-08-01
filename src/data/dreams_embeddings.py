@@ -5,7 +5,7 @@ dreaMS embedding generation for molecule node features.
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 import logging
 import pickle
 from dreams.api import dreams_embeddings
@@ -36,7 +36,6 @@ class DreaMSEmbeddingGenerator:
         
         Args:
             mgf_path: Path to MGF file
-            batch_size: Batch size for processing
             force_regenerate: Force regeneration even if cached
             
         Returns:
@@ -125,94 +124,4 @@ class DreaMSEmbeddingGenerator:
             
         except Exception as e:
             logger.error(f"Error extracting Feature IDs from MGF: {e}")
-            return []
-    
-    def get_embedding_dimension(self, embeddings_df: pd.DataFrame) -> int:
-        """
-        Get the dimension of dreaMS embeddings.
-        
-        Args:
-            embeddings_df: DataFrame with embeddings
-            
-        Returns:
-            Embedding dimension
-        """
-        # All columns are embedding dimensions now
-        return len(embeddings_df.columns)
-    
-    def validate_embeddings(self, embeddings_df: pd.DataFrame) -> bool:
-        """
-        Validate dreaMS embeddings quality.
-        
-        Args:
-            embeddings_df: DataFrame with embeddings
-            
-        Returns:
-            True if embeddings are valid
-        """
-        if embeddings_df.empty:
-            logger.error("Embeddings DataFrame is empty")
-            return False
-        
-        # Check for NaN values
-        nan_count = embeddings_df.isna().sum().sum()
-        if nan_count > 0:
-            logger.warning(f"Found {nan_count} NaN values in embeddings")
-        
-        # Check embedding dimension
-        embedding_dim = self.get_embedding_dimension(embeddings_df)
-        if embedding_dim == 0:
-            logger.error("No embedding dimensions found")
-            return False
-        
-        logger.info(f"Embedding validation passed: {len(embeddings_df)} embeddings, {embedding_dim} dimensions")
-        return True
-    
-    def get_embedding_summary(self, embeddings_df: pd.DataFrame) -> Dict:
-        """
-        Generate summary statistics for embeddings.
-        
-        Args:
-            embeddings_df: DataFrame with embeddings
-            
-        Returns:
-            Dictionary with embedding summary
-        """
-        embedding_dim = self.get_embedding_dimension(embeddings_df)
-        
-        summary = {
-            'total_embeddings': len(embeddings_df),
-            'embedding_dimension': embedding_dim,
-            'memory_usage_mb': embeddings_df.memory_usage(deep=True).sum() / 1024 / 1024,
-            'nan_count': embeddings_df.isna().sum().sum(),
-            'mean_norm': np.linalg.norm(embeddings_df.select_dtypes(include=[np.number]), axis=1).mean()
-        }
-        
-        return summary
-
-
-def test_dreams_integration():
-    """
-    Test dreaMS integration with sample data.
-    """
-    mgf_path = Path("data/500_foods.mgf")
-    
-    if not mgf_path.exists():
-        logger.warning(f"MGF file not found: {mgf_path}")
-        return False
-    
-    try:
-        generator = DreaMSEmbeddingGenerator()
-        embeddings_df = generator.generate_embeddings(mgf_path, force_regenerate=False)
-        
-        if generator.validate_embeddings(embeddings_df):
-            summary = generator.get_embedding_summary(embeddings_df)
-            logger.info(f"dreaMS integration test passed: {summary}")
-            return True
-        else:
-            logger.error("dreaMS integration test failed: invalid embeddings")
-            return False
-            
-    except Exception as e:
-        logger.error(f"dreaMS integration test failed: {e}")
-        return False 
+            return [] 
