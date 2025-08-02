@@ -35,16 +35,9 @@ class Sample(BaseModel):
     nutrients: List[Nutrient]
 
 
-class FeatureEmbedding(BaseModel):
-    """Feature embedding data."""
-    id: int
-    embedding: List[float]
-
-
 class IntermediateOutput(BaseModel):
     """Complete intermediate output format."""
     samples: List[Sample]
-    feature_embeddings: List[FeatureEmbedding]
 
 
 class FoodMetabolomicsProcessor:
@@ -62,7 +55,6 @@ class FoodMetabolomicsProcessor:
         """
         self.data_dir = Path(data_dir)
         self.data = {}
-        self.embeddings = None
         
     def load_data(self) -> bool:
         """
@@ -129,11 +121,22 @@ class FoodMetabolomicsProcessor:
             logger.warning("Intensity data not loaded")
             return {}
         
+        # Get filename from metadata using sample_id
+        if 'metadata' not in self.data:
+            logger.warning("Metadata not loaded")
+            return {}
+        
+        sample_metadata = self.data['metadata'][self.data['metadata']['filename'] == sample_id]
+        if sample_metadata.empty:
+            logger.warning(f"Sample {sample_id} not found in metadata")
+            return {}
+        
+        filename = sample_metadata.iloc[0]['filename']
         intensity_df = self.data['intensity']
-        intensity_col = f"{sample_id} Peak area"
+        intensity_col = f"{filename} Peak area"
         
         if intensity_col not in intensity_df.columns:
-            logger.warning(f"No intensity column found for sample {sample_id}")
+            logger.warning(f"No intensity column found for sample {filename}")
             return {}
         
         # Get intensities for this sample
@@ -149,7 +152,7 @@ class FoodMetabolomicsProcessor:
         # Convert to dictionary
         intensities = sample_intensities.set_index('Feature')['intensity'].to_dict()
         
-        logger.debug(f"Found {len(intensities)} non-zero intensities for sample {sample_id}")
+        logger.debug(f"Found {len(intensities)} non-zero intensities for sample {filename}")
         return intensities
     
     def get_food_for_sample(self, sample_id: str) -> Optional[str]:
@@ -242,48 +245,16 @@ class FoodMetabolomicsProcessor:
         logger.debug(f"Found {len(nutrients)} nutrients for {food_name}")
         return nutrients
     
-    def generate_embeddings(self, mgf_path: Union[str, Path]) -> bool:
-        """
-        Generate dreaMS embeddings for features.
-        
-        Args:
-            mgf_path: Path to MGF file
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            from .dreams_embeddings import DreaMSEmbeddingGenerator
-            
-            generator = DreaMSEmbeddingGenerator()
-            embeddings_df = generator.generate_embeddings(mgf_path)
-            
-            if embeddings_df is not None and not embeddings_df.empty:
-                self.embeddings = embeddings_df
-                logger.info(f"Generated embeddings for {len(embeddings_df)} features")
-                return True
-            else:
-                logger.error("Failed to generate embeddings")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error generating embeddings: {e}")
-            return False
-    
     def process_all_samples(self) -> IntermediateOutput:
         """
         Process all samples to generate intermediate JSON format.
         
         Returns:
-            IntermediateOutput with samples and feature embeddings
+            IntermediateOutput with samples
         """
         if 'metadata' not in self.data:
             logger.error("Metadata not loaded")
-            return IntermediateOutput(samples=[], feature_embeddings=[])
-        
-        if self.embeddings is None:
-            logger.error("Embeddings not generated - call generate_embeddings() first")
-            return IntermediateOutput(samples=[], feature_embeddings=[])
+            return IntermediateOutput(samples=[])
         
         samples = []
         metadata_df = self.data['metadata']
@@ -307,11 +278,7 @@ class FoodMetabolomicsProcessor:
             # Convert intensities to Feature objects
             features = []
             for feature_id, intensity in intensities.items():
-                # Try to find feature ID in embeddings
-                if feature_id in self.embeddings.index:
-                    # Use the index position as ID
-                    feature_idx = self.embeddings.index.get_loc(feature_id)
-                    features.append(Feature(id=feature_idx, intensity=intensity))
+                features.append(Feature(id=int(feature_id), intensity=intensity))
             
             # Convert nutrients to Nutrient objects
             nutrient_objects = []
@@ -336,16 +303,8 @@ class FoodMetabolomicsProcessor:
             if (idx + 1) % 100 == 0:
                 logger.info(f"Processed {idx + 1}/{len(metadata_df)} samples")
         
-        # Create feature embeddings
-        feature_embeddings = []
-        for idx, (feature_id, embedding) in enumerate(self.embeddings.iterrows()):
-            feature_embeddings.append(FeatureEmbedding(
-                id=idx,
-                embedding=embedding.tolist()
-            ))
-        
-        logger.info(f"Completed processing {len(samples)} samples and {len(feature_embeddings)} embeddings")
-        return IntermediateOutput(samples=samples, feature_embeddings=feature_embeddings)
+        logger.info(f"Completed processing {len(samples)} samples")
+        return IntermediateOutput(samples=samples)
     
     def save_intermediate_json(self, output_path: Union[str, Path], output_data: IntermediateOutput) -> bool:
         """
@@ -372,14 +331,12 @@ class FoodMetabolomicsProcessor:
             logger.error(f"Error saving JSON: {e}")
             return False
     
-    def generate_intermediate_format(self, output_path: Union[str, Path] = "data/intermediate_samples.json", 
-                                  mgf_path: Union[str, Path] = None) -> bool:
+    def generate_intermediate_format(self, output_path: Union[str, Path] = "data/intermediate_samples.json") -> bool:
         """
         Generate intermediate JSON format from raw data.
         
         Args:
             output_path: Path to save intermediate JSON file
-            mgf_path: Path to MGF file for embedding generation
             
         Returns:
             True if successful, False otherwise
@@ -387,14 +344,6 @@ class FoodMetabolomicsProcessor:
         # Load data
         if not self.load_data():
             return False
-        
-        # Generate embeddings if MGF path provided
-        if mgf_path:
-            if not self.generate_embeddings(mgf_path):
-                logger.error("Failed to generate embeddings")
-                return False
-        else:
-            logger.warning("No MGF path provided - skipping embedding generation")
         
         # Process all samples
         output_data = self.process_all_samples()
@@ -414,7 +363,6 @@ class FoodMetabolomicsProcessor:
         
         logger.info(f"Intermediate format generated:")
         logger.info(f"  - {len(output_data.samples)} samples")
-        logger.info(f"  - {len(output_data.feature_embeddings)} feature embeddings")
         logger.info(f"  - {total_features} total feature intensities")
         logger.info(f"  - {total_nutrients} total nutrient entries")
         logger.info(f"  - {unique_foods} unique foods")

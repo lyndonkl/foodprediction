@@ -24,6 +24,7 @@ dependencies:
   - pyyaml
   - tensorboard
   - pip
+  - pydantic
   - pip:
     - torch-geometric
     - torch-scatter

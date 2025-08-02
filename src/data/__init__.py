@@ -9,11 +9,11 @@ This package handles:
 """
 
 from .processor import FoodMetabolomicsProcessor
-from .dreams_embeddings import DreaMSEmbeddingGenerator
+from .generate_intermediate import main
 
 __version__ = "0.1.0"
 
 __all__ = [
     'FoodMetabolomicsProcessor',
-    'DreaMSEmbeddingGenerator'
+    'main'
 ] 

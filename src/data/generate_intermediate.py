@@ -5,7 +5,7 @@ Script to generate intermediate JSON format from raw data files.
 
 import logging
 from pathlib import Path
-from processor import FoodMetabolomicsProcessor
+from .processor import FoodMetabolomicsProcessor
 
 # Set up logging
 logging.basicConfig(
@@ -17,10 +17,10 @@ def main():
     """Generate intermediate JSON format from raw data."""
     
     # Initialize processor with correct data directory
-    processor = FoodMetabolomicsProcessor(data_dir="../../data")
+    processor = FoodMetabolomicsProcessor(data_dir="data")
     
     # Generate intermediate format
-    output_path = "../../data/intermediate_samples.json"
+    output_path = "data/intermediate_samples.json"
     
     print("Generating intermediate JSON format...")
     success = processor.generate_intermediate_format(output_path)
