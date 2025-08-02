@@ -35,9 +35,36 @@ class Sample(BaseModel):
     nutrients: List[Nutrient]
 
 
+class UniqueNutrient(BaseModel):
+    """Unique nutrient information."""
+    id: int
+    name: str
+
+
+class NutrientMetadata(BaseModel):
+    """Metadata about nutrients across all samples."""
+    num_unique: int
+    num_unit_types: int
+    unique_nutrients: List[UniqueNutrient]
+    unique_nutrient_units: List[str]
+
+
+class FeatureMetadata(BaseModel):
+    """Metadata about features across all samples."""
+    num_unique: int
+    unique_feature_ids: List[int]
+
+
+class SampleMetadata(BaseModel):
+    """Metadata about samples."""
+    nutrients: NutrientMetadata
+    features: FeatureMetadata
+
+
 class IntermediateOutput(BaseModel):
     """Complete intermediate output format."""
     samples: List[Sample]
+    metadata: SampleMetadata
 
 
 class FoodMetabolomicsProcessor:
@@ -304,7 +331,63 @@ class FoodMetabolomicsProcessor:
                 logger.info(f"Processed {idx + 1}/{len(metadata_df)} samples")
         
         logger.info(f"Completed processing {len(samples)} samples")
-        return IntermediateOutput(samples=samples)
+        
+        # Calculate metadata in a single pass
+        metadata = self._calculate_metadata(samples)
+        
+        return IntermediateOutput(samples=samples, metadata=metadata)
+    
+    def _calculate_metadata(self, samples: List[Sample]) -> SampleMetadata:
+        """
+        Calculate metadata about nutrients and features across all samples.
+        
+        Args:
+            samples: List of processed samples
+            
+        Returns:
+            SampleMetadata with calculated statistics
+        """
+        # Sets to collect unique items
+        unique_nutrients = {}  # id -> name mapping
+        unique_nutrient_units = set()
+        unique_feature_ids = set()
+        
+        # Single pass through all samples
+        for sample in samples:
+            # Collect unique nutrients
+            for nutrient in sample.nutrients:
+                unique_nutrients[nutrient.id] = nutrient.name
+                unique_nutrient_units.add(nutrient.unit)
+            
+            # Collect unique feature IDs
+            for feature in sample.features:
+                unique_feature_ids.add(feature.id)
+        
+        # Create nutrient metadata
+        nutrient_metadata = NutrientMetadata(
+            num_unique=len(unique_nutrients),
+            num_unit_types=len(unique_nutrient_units),
+            unique_nutrients=[
+                UniqueNutrient(id=nutrient_id, name=name)
+                for nutrient_id, name in unique_nutrients.items()
+            ],
+            unique_nutrient_units=sorted(list(unique_nutrient_units))
+        )
+        
+        # Create feature metadata
+        feature_metadata = FeatureMetadata(
+            num_unique=len(unique_feature_ids),
+            unique_feature_ids=sorted(list(unique_feature_ids))
+        )
+        
+        # Create sample metadata
+        sample_metadata = SampleMetadata(
+            nutrients=nutrient_metadata,
+            features=feature_metadata
+        )
+        
+        logger.info(f"Calculated metadata: {len(unique_nutrients)} unique nutrients, {len(unique_feature_ids)} unique features")
+        return sample_metadata
     
     def save_intermediate_json(self, output_path: Union[str, Path], output_data: IntermediateOutput) -> bool:
         """
