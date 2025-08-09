@@ -1,0 +1,9 @@
+# PyG wheels pinned for torch==2.3.1 (CPU)
+# If using CUDA, change link accordingly.
+
+torch-scatter==2.1.2
+torch-sparse==0.6.18
+torch-cluster==1.6.3
+torch-spline-conv==1.2.2
+
+--find-links https://data.pyg.org/whl/torch-2.3.1+cpu.html

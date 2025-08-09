@@ -1,108 +1,97 @@
 # Food Metabolomics Data Processing
 
-This directory contains the streamlined data processing pipeline for food metabolomics graph learning.
+This folder builds the dataset for a single large heterogeneous graph used for training.
 
-## Overview
+## Components
 
-The data processing pipeline has been cleaned up and streamlined to focus on generating an intermediate JSON format that contains all the necessary information for graph construction.
+- `processor.py`: Loads CSVs and produces `data/intermediate_samples.json` (samples, features, foods, nutrients + metadata).
+- `generate_intermediate.py`: CLI to run the processor.
+- `hetero_graph.py`: Builds a PyTorch Geometric `HeteroData` graph and saves graph + index mappings.
+- `__init__.py`: Exposes a small public API for convenient imports.
 
-## Files
+## Environment
 
-### Core Files
+Use the project root `environment.yml` (Python 3.11, torch 2.3.1 with PyG wheels). From repo root:
+```bash
+conda env create -f environment.yml
+conda activate foodprediction
+```
 
-- **`processor.py`** - Main data processor that generates intermediate JSON format
-- **`loaders.py`** - Essential data loading utilities
-- **`dreams_embeddings.py`** - dreaMS embedding generation for molecule features
-- **`__init__.py`** - Package initialization and exports
+## Required data files (under `data/`)
 
-### Scripts
+- `Metadata_500food.csv`
+- `featuretable_reformated - Kushal.csv`
+- Optional directory `FoodData_Central_csv_2025-04-24/` containing: `nutrient.csv`, `food_nutrient.csv`, `sr_legacy_food.csv` (for Food→Nutrient edges)
 
-- **`generate_intermediate.py`** - Script to generate the intermediate JSON format
-- **`test_processor.py`** - Test script to verify processor functionality
+## Build the dataset
 
-## Usage
+### 1) Generate intermediate JSON
+```bash
+python -m src.data.generate_intermediate
+# Outputs: data/intermediate_samples.json
+```
 
-### Generate Intermediate JSON Format
+### 2) Construct the hetero graph (with z-score normalization)
+```bash
+python -m src.data.hetero_graph \
+  --json data/intermediate_samples.json \
+  --out data/hetero_graph.pt \
+  --zscore-nutrients-by nutrient_unit
 
+# Outputs:
+# - data/hetero_graph.pt                (PyG HeteroData, ready for training)
+# - data/hetero_graph_mappings.json     (indices for foods, features, nutrients, units, samples)
+```
+
+## Programmatic usage
 ```python
-from processor import FoodMetabolomicsProcessor
+from src.data import (
+    FoodMetabolomicsProcessor,
+    load_intermediate_json,
+    build_hetero_graph,
+    build_and_save_hetero_graph,
+)
 
-# Initialize processor
+# Generate intermediate JSON
 processor = FoodMetabolomicsProcessor(data_dir="data")
+processor.generate_intermediate_format("data/intermediate_samples.json")
 
-# Generate intermediate format
-success = processor.generate_intermediate_format("data/intermediate_samples.json")
+# Build and save hetero graph
+build_and_save_hetero_graph(
+    json_path="data/intermediate_samples.json",
+    output_path="data/hetero_graph.pt",
+    zscore_features=True,
+    zscore_nutrients_by="nutrient_unit",
+)
 ```
 
-### Run the Generation Script
-
-```bash
-cd src/data
-python generate_intermediate.py
-```
-
-### Test the Processor
-
-```bash
-cd src/data
-python test_processor.py
-```
-
-## Intermediate JSON Format
-
-The intermediate JSON format contains an array of sample objects, where each sample object has the following structure:
-
+## Intermediate JSON structure (simplified)
 ```json
 {
-  "sample_id": "sample_filename",
-  "food_name": "food_type",
-  "intensities": {
-    "feature_id": intensity_value,
-    ...
-  },
-  "nutrients": {
-    "nutrient_name_unit": {
-      "name": "nutrient_name",
-      "unit": "unit_name", 
-      "value": nutrient_value
-    },
-    ...
+  "samples": [
+    {
+      "id": 0,
+      "food_name": "apple",
+      "features": [{ "id": 123, "intensity": 456.7 }, ...],
+      "nutrients": [{ "id": 1003, "name": "Protein", "amount": 0.3, "unit": "g" }, ...]
+    }
+  ],
+  "metadata": {
+    "features": { "unique_feature_ids": [1, 2, ...] },
+    "nutrients": {
+      "unique_nutrient_units": ["g", "mg", ...],
+      "unique_nutrients": [{ "id": 1003, "name": "Protein" }, ...]
+    }
   }
 }
 ```
 
-## Data Flow
+## Normalization
 
-1. **Load Raw Data**: Load metadata, intensity, and nutrient CSV files
-2. **Process Samples**: For each sample in metadata:
-   - Extract feature intensities for the sample
-   - Get associated food name
-   - Get nutrient data for the food
-3. **Generate JSON**: Save all sample objects to intermediate JSON file
-4. **Graph Construction**: Use the JSON file to build the heterogeneous graph (in separate module)
+- `('Sample','Contains','Feature')`: intensity is z-scored per feature id across samples.
+- `('Food','Contains','Nutrient')`: amount is z-scored per nutrient (or per nutrient+unit when `--zscore-nutrients-by nutrient_unit`), then unit one-hot is appended to edge_attr.
 
-## Required Data Files
+## Notes
 
-The processor expects the following files in the data directory:
-
-- `Metadata_500food.csv` - Sample metadata with food associations
-- `featuretable_reformated - Kushal.csv` - Feature intensity matrix
-- `nutrient.csv` - USDA nutrient definitions
-- `food_nutrient.csv` - USDA food-nutrient relationships
-- `sr_legacy_food.csv` - SR Legacy food mapping
-
-## Benefits of Streamlined Approach
-
-1. **Clear Data Flow**: Single responsibility for each component
-2. **Reduced Complexity**: Removed redundant functions and classes
-3. **Better Testing**: Easier to test individual components
-4. **Intermediate Format**: JSON format provides clear data structure for graph construction
-5. **Separation of Concerns**: Data processing separate from graph construction
-
-## Next Steps
-
-The intermediate JSON format can be used to:
-1. Build heterogeneous graphs with PyTorch Geometric
-2. Apply dreaMS embeddings to molecule nodes
-3. Create train/validation/test splits
-4. Implement graph neural network models 
+- Reverse edges are added automatically so information propagates both ways during message passing.
+- Index mappings are saved both into the graph (`graph.graph_metadata`) and as JSON for inference.

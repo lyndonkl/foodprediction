@@ -4,8 +4,8 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.12
-  - pytorch=2.5.*
+  - python=3.11
+  - pytorch=2.3.1
   - numpy
   - pandas
   - scipy
@@ -27,9 +27,7 @@ dependencies:
   - pydantic
   - pip:
     - torch-geometric
-    - torch-scatter
-    - torch-cluster
-    - torch-spline-conv
+    - -r requirements-pyg.txt
 
 # Note: dreaMS is installed separately via:
 # git clone https://github.com/pluskal-lab/DreaMS.git
