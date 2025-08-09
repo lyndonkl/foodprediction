@@ -10,10 +10,18 @@ This package handles:
 
 from .processor import FoodMetabolomicsProcessor
 from .generate_intermediate import main
+from .hetero_graph import (
+    load_intermediate_json,
+    build_hetero_graph,
+    build_and_save_hetero_graph,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
     'FoodMetabolomicsProcessor',
-    'main'
+    'main',
+    'load_intermediate_json',
+    'build_hetero_graph',
+    'build_and_save_hetero_graph',
 ] 
