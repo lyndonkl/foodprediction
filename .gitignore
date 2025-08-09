@@ -46,7 +46,6 @@ DreaMS/*
 
 # Model checkpoints
 checkpoints/
-models/
 *.pth
 *.pt
 *.ckpt
