@@ -31,7 +31,8 @@ from .ddp_utils import ddp_setup, ddp_wrap_model, ddp_cleanup, is_main_process
 class HeteroGATPretrainWrapper(nn.Module):
     def __init__(self, data: HeteroData, cfg: PretrainConfig):
         super().__init__()
-        self.encoder = HeteroGATEncoder(data.metadata(), cfg)
+        num_nodes_by_type = {nt: data[nt].num_nodes for nt in data.node_types}
+        self.encoder = HeteroGATEncoder(data.metadata(), cfg, num_nodes_by_type)
 
     def forward(self, data: HeteroData) -> Dict[str, Tensor]:
         # Build x_dict from internal embeddings using current graph sizes

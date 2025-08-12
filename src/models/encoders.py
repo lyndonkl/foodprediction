@@ -11,7 +11,12 @@ from .configs import ModelConfig, PretrainConfig
 
 
 class HeteroGATEncoder(nn.Module):
-    def __init__(self, metadata: Tuple[List[str], List[Tuple[str, str, str]]], cfg: ModelConfig | PretrainConfig):
+    def __init__(
+        self,
+        metadata: Tuple[List[str], List[Tuple[str, str, str]]],
+        cfg: ModelConfig | PretrainConfig,
+        num_nodes_by_type: Dict[str, int],
+    ):
         super().__init__()
         node_types, edge_types = metadata
         self.node_types = node_types
@@ -19,7 +24,10 @@ class HeteroGATEncoder(nn.Module):
         self.cfg = cfg
 
         self.embeddings = nn.ModuleDict({
-            node_type: nn.Embedding(num_embeddings=1, embedding_dim=cfg.embedding_dim)
+            node_type: nn.Embedding(
+                num_embeddings=num_nodes_by_type[node_type],
+                embedding_dim=cfg.embedding_dim,
+            )
             for node_type in node_types
         })
 
