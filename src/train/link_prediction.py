@@ -151,7 +151,7 @@ def train(
         dropout=dropout,
     )
     device_t, rank, world_size, local_rank = ddp_setup()
-    model = HeteroLinkPredModel(train_data.metadata(), cfg, supervised_edge_types=edge_types)
+    model = HeteroLinkPredModel(train_data.metadata(), cfg, supervised_edge_types=edge_types, data=train_data)
     model = ddp_wrap_model(model, device_t, world_size, local_rank)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -185,6 +185,16 @@ def train(
     for epoch in range(1, epochs + 1):
         model.train()
 
+        # Extract edge attributes for model forward pass
+        edge_attr_dict = {}
+        for edge_type in train_data.edge_types:
+            if hasattr(train_data[edge_type], "edge_attr") and train_data[edge_type].edge_attr is not None:
+                edge_attr_dict[edge_type] = train_data[edge_type].edge_attr.to(device_t)
+        
+        # Initialize node features
+        num_nodes_by_type = {nt: train_data[nt].num_nodes for nt in train_data.node_types}
+        x_dict = model.init_node_features(num_nodes_by_type, device_t)
+
         # ---- Link prediction loss (mini-batch with neighbor sampling or full-graph fallback) ----
         total_lp_loss = 0.0
         num_lp_steps = 0
@@ -193,7 +203,8 @@ def train(
                 for batch in loader:
                     batch = batch.to(device_t)
                     optimizer.zero_grad()
-                    z_dict = model(batch)
+                    # Forward pass
+                    z_dict = model(x_dict, train_data.edge_index_dict, edge_attr_dict)
                     edge_label_index = batch[et].edge_label_index
                     edge_label = batch[et].edge_label
                     scores = model.predict_edge_scores(z_dict, et, edge_label_index)
@@ -204,7 +215,8 @@ def train(
                     num_lp_steps += 1
         else:
             optimizer.zero_grad()
-            z_dict = model(train_data)
+            # Forward pass
+            z_dict = model(x_dict, train_data.edge_index_dict, edge_attr_dict)
             for et in edge_types:
                 pos_index = train_data[et]["train_edge_label_index_pos"]
                 neg_index = train_data[et]["train_edge_label_index_neg"]

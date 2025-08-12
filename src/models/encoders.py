@@ -16,6 +16,7 @@ class HeteroGATEncoder(nn.Module):
         metadata: Tuple[List[str], List[Tuple[str, str, str]]],
         cfg: ModelConfig | PretrainConfig,
         num_nodes_by_type: Dict[str, int],
+        edge_dims: Dict[Tuple[str, str, str], int] = None,
     ):
         super().__init__()
         node_types, edge_types = metadata
@@ -43,6 +44,7 @@ class HeteroGATEncoder(nn.Module):
                         dropout=cfg.dropout,
                         add_self_loops=False,
                         concat=True,
+                        edge_dim=edge_dims.get(edge_type, 0) if edge_dims else 0,
                     )
                     for edge_type in edge_types
                 },
@@ -60,10 +62,10 @@ class HeteroGATEncoder(nn.Module):
             x_dict[node_type] = self.embeddings[node_type](idx)
         return x_dict
 
-    def forward(self, x_dict: Dict[str, Tensor], edge_index_dict: Dict[Tuple[str, str, str], Tensor]) -> Dict[str, Tensor]:
+    def forward(self, x_dict: Dict[str, Tensor], edge_index_dict: Dict[Tuple[str, str, str], Tensor], edge_attr_dict: Dict[Tuple[str, str, str], Tensor] = None) -> Dict[str, Tensor]:
         h_dict = x_dict
         for conv in self.layers:
-            h_dict = conv(h_dict, edge_index_dict)
+            h_dict = conv(h_dict, edge_index_dict, edge_attr_dict)
             h_dict = {k: F.elu(self.dropout(v)) for k, v in h_dict.items()}
         return h_dict
 

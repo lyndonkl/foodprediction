@@ -32,14 +32,30 @@ class HeteroGATPretrainWrapper(nn.Module):
     def __init__(self, data: HeteroData, cfg: PretrainConfig):
         super().__init__()
         num_nodes_by_type = {nt: data[nt].num_nodes for nt in data.node_types}
-        self.encoder = HeteroGATEncoder(data.metadata(), cfg, num_nodes_by_type)
+        
+        # Compute edge dimensions from data
+        edge_dims = {}
+        for edge_type in data.edge_types:
+            if hasattr(data[edge_type], "edge_attr") and data[edge_type].edge_attr is not None:
+                edge_dims[edge_type] = data[edge_type].edge_attr.size(-1)
+            else:
+                edge_dims[edge_type] = 0
+        
+        self.encoder = HeteroGATEncoder(data.metadata(), cfg, num_nodes_by_type, edge_dims)
 
     def forward(self, data: HeteroData) -> Dict[str, Tensor]:
         # Build x_dict from internal embeddings using current graph sizes
         num_nodes_by_type = {nt: data[nt].num_nodes for nt in data.node_types}
         device = next(self.encoder.parameters()).device
         x_dict = self.encoder._init_node_features(num_nodes_by_type, device)
-        return self.encoder(x_dict, data.edge_index_dict)
+        
+        # Extract edge attributes
+        edge_attr_dict = {}
+        for edge_type in data.edge_types:
+            if hasattr(data[edge_type], "edge_attr") and data[edge_type].edge_attr is not None:
+                edge_attr_dict[edge_type] = data[edge_type].edge_attr.to(device)
+        
+        return self.encoder(x_dict, data.edge_index_dict, edge_attr_dict)
 
 
 def cosine_nt_xent(z1: Tensor, z2: Tensor, temperature: float) -> Tensor:
