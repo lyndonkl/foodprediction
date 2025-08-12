@@ -168,7 +168,7 @@ def pretrain(
     optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if loss_node_types is None:
-        loss_node_types = ["Food", "Sample"]
+        loss_node_types = ["Food", "Feature", "Nutrient", "Sample"]
 
     drop_edges = {
         ("Sample", "Contains", "Feature"): drop_sample_feature_edges,
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     p.add_argument("--drop-food-nutrient-edges", type=float, default=0.1)
     p.add_argument("--mask-intensity", type=float, default=0.1)
     p.add_argument("--mask-nutrient-amount", type=float, default=0.1)
-    p.add_argument("--loss-node-types", type=str, nargs="+", default=["Food", "Sample"])
+    p.add_argument("--loss-node-types", type=str, nargs="+", default=["Food", "Feature", "Nutrient", "Sample"])
 
     a = p.parse_args()
     pretrain(
