@@ -87,6 +87,19 @@ Notes:
 - Launch on multiple processes using `torchrun`:
 ```bash
 # Pretrain
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+torchrun -m src.train.pretrain_graphcl \
+  --graph data/hetero_graph.pt \
+  --epochs 100 \
+  --lr 1e-3 \
+  --temperature 0.2 \
+  --drop-food 0.1 \
+  --drop-feature 0.1 \
+  --drop-sample-feature-edges 0.1 \
+  --drop-food-nutrient-edges 0.1 \
+  --mask-intensity 0.1 \
+  --mask-nutrient-amount 0.1
+  
 torchrun --nproc_per_node=2 -m src.train.pretrain_graphcl --graph data/hetero_graph.pt
 
 # Fine-tune
