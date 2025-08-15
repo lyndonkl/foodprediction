@@ -174,10 +174,17 @@ def pretrain(
         ("Sample", "Contains", "Feature"): drop_sample_feature_edges,
         ("Food", "Contains", "Nutrient"): drop_food_nutrient_edges,
         ("Sample", "Is_of_type", "Food"): 0.0,
+        # Reverse edges - use same probabilities as forward edges
+        ("Feature", "rev_Contains", "Sample"): drop_sample_feature_edges,
+        ("Nutrient", "rev_Contains", "Food"): drop_food_nutrient_edges,
+        ("Food", "rev_Is_of_type", "Sample"): 0.0,
     }
     mask_edge_attr = {
         ("Sample", "Contains", "Feature"): mask_intensity,
         ("Food", "Contains", "Nutrient"): mask_nutrient_amount,
+        # Reverse edges - use same masking probabilities as forward edges
+        ("Feature", "rev_Contains", "Sample"): mask_intensity,
+        ("Nutrient", "rev_Contains", "Food"): mask_nutrient_amount,
     }
 
     probs = AugmentProb(
