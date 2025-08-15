@@ -16,8 +16,8 @@ def infer_device_and_backend(local_rank_env: Optional[str]) -> Tuple[torch.devic
         local_rank = int(local_rank_env or 0)
         torch.cuda.set_device(local_rank)
         return torch.device(f"cuda:{local_rank}"), "nccl", local_rank
-    if torch.backends.mps.is_available():
-        return torch.device("mps"), "gloo", None
+    # if torch.backends.mps.is_available():
+    #     return torch.device("mps"), "gloo", None
     return torch.device("cpu"), "gloo", None
 
 
