@@ -90,7 +90,8 @@ Notes:
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 torchrun -m src.train.pretrain_graphcl \
   --graph data/hetero_graph.pt \
-  --epochs 100 \
+  --epochs 200 \
+  --device "cpu" \
   --lr 1e-3 \
   --temperature 0.2 \
   --drop-food 0.1 \
