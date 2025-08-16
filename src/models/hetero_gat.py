@@ -12,7 +12,7 @@ import torch
 from torch import nn, Tensor
 from .configs import ModelConfig
 from .encoders import HeteroGATEncoder
-from .decoders import DotProductDecoder
+from .decoders import DotProductDecoder, FoodOriginPredictionHead
 from torch_geometric.data import HeteroData
 
 
@@ -31,10 +31,26 @@ class HeteroLinkPredModel(nn.Module):
                 else:
                     edge_dims[edge_type] = 0
         
-        self.encoder = HeteroGATEncoder(data_metadata, cfg, edge_dims=edge_dims if data is not None else None)
-        self.decoder = nn.ModuleDict({
-            str(edge_type): DotProductDecoder() for edge_type in supervised_edge_types
-        })
+        # Get number of nodes by type for encoder initialization
+        num_nodes_by_type = {}
+        if data is not None:
+            for node_type in data.node_types:
+                num_nodes_by_type[node_type] = data[node_type].num_nodes
+        
+        self.encoder = HeteroGATEncoder(data_metadata, cfg, num_nodes_by_type, edge_dims=edge_dims if data is not None else None)
+        
+        # Task 1: Food Origin Prediction decoder (MLP for Sample->Food edges)
+        self.decoders = nn.ModuleDict()
+        for edge_type in supervised_edge_types:
+            # All supervised edge types should be Sample->Food for Food Origin Prediction
+            if edge_type == ("Sample", "Is_of_type", "Food"):
+                self.decoders[str(edge_type)] = FoodOriginPredictionHead(
+                    embedding_dim=cfg.hidden_dim,
+                    hidden_dim=cfg.hidden_dim,
+                    dropout=cfg.dropout
+                )
+            else:
+                raise ValueError(f"Only Sample->Food edges should be supervised for Food Origin Prediction, got {edge_type}")
 
     def init_node_features(self, num_nodes_by_type: Dict[str, int], device: torch.device) -> Dict[str, Tensor]:
         x_dict: Dict[str, Tensor] = {}
@@ -46,7 +62,7 @@ class HeteroLinkPredModel(nn.Module):
 
     def predict_edge_scores(self, z_dict: Dict[str, Tensor], edge_type: Tuple[str, str, str], edge_label_index: Tensor) -> Tensor:
         src_type, _, dst_type = edge_type
-        decoder = self.decoder[str(edge_type)]
+        decoder = self.decoders[str(edge_type)]
         return decoder(z_dict[src_type], z_dict[dst_type], edge_label_index)
 
     def forward(self, x_dict: Dict[str, Tensor], edge_index_dict: Dict[Tuple[str, str, str], Tensor], edge_attr_dict: Dict[Tuple[str, str, str], Tensor] = None) -> Dict[str, Tensor]:
