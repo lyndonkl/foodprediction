@@ -39,6 +39,106 @@ from src.models.hetero_gat import HeteroLinkPredModel
 
 
 # -------------------------
+# Contrastive helpers
+# -------------------------
+
+
+def _compute_nutritional_similarity_matrix(data: HeteroData, device: torch.device) -> Tensor:
+    """
+    Build a Food x Food similarity matrix based on shared nutrients.
+    Uses the graph structure to find nutritionally similar foods.
+    """
+    if ("Food", "Contains", "Nutrient") not in data.edge_types:
+        return torch.eye(data["Food"].num_nodes, device=device)
+    
+    et = ("Food", "Contains", "Nutrient")
+    ei = data[et].edge_index
+    if ei is None or ei.numel() == 0:
+        return torch.eye(data["Food"].num_nodes, device=device)
+    
+    F = data["Food"].num_nodes
+    N = data["Nutrient"].num_nodes
+    
+    # Create binary Food x Nutrient matrix (1 if food contains nutrient, 0 otherwise)
+    food_nutrient_matrix = torch.zeros((F, N), dtype=torch.float32, device=device)
+    food_nutrient_matrix.index_put_((ei[0].to(device), ei[1].to(device)), torch.ones(ei.size(1), device=device))
+    
+    # Compute cosine similarity between foods based on shared nutrients
+    # Normalize rows
+    norms = food_nutrient_matrix.norm(dim=1, keepdim=True).clamp_min(1e-6)
+    food_nutrient_norm = food_nutrient_matrix / norms
+    
+    # Compute similarity matrix
+    similarity_matrix = torch.matmul(food_nutrient_norm, food_nutrient_norm.t())
+    
+    # Mask self-similarity
+    similarity_matrix.fill_diagonal_(0.0)
+    
+    return similarity_matrix
+
+
+def _sample_nutritional_triplets(
+    similarity_matrix: Tensor,
+    num_triplets: int,
+    pos_threshold: float = 0.5,
+    neg_threshold: float = 0.1,
+) -> Tuple[Tensor, Tensor, Tensor] | None:
+    """
+    Sample (anchor, positive, negative) indices for Food contrastive learning
+    based on nutritional similarity from the graph structure.
+    
+    Args:
+        similarity_matrix: Food x Food similarity matrix
+        num_triplets: Number of triplets to sample
+        pos_threshold: Minimum similarity for positive pairs
+        neg_threshold: Maximum similarity for negative pairs
+    """
+    F = similarity_matrix.size(0)
+    if F < 3:
+        return None
+    
+    # Find positive and negative pairs for each food
+    pos_mask = similarity_matrix >= pos_threshold
+    neg_mask = similarity_matrix <= neg_threshold
+    
+    anchors = []
+    positives = []
+    negatives = []
+    
+    # Sample triplets
+    for anchor in range(F):
+        # Find positive candidates (nutritionally similar)
+        pos_candidates = torch.where(pos_mask[anchor])[0]
+        if len(pos_candidates) == 0:
+            continue
+            
+        # Find negative candidates (nutritionally dissimilar)
+        neg_candidates = torch.where(neg_mask[anchor])[0]
+        if len(neg_candidates) == 0:
+            continue
+        
+        # Sample positive and negative
+        pos_idx = pos_candidates[torch.randint(0, len(pos_candidates), (1,))]
+        neg_idx = neg_candidates[torch.randint(0, len(neg_candidates), (1,))]
+        
+        anchors.append(anchor)
+        positives.append(pos_idx.item())
+        negatives.append(neg_idx.item())
+        
+        if len(anchors) >= num_triplets:
+            break
+    
+    if not anchors:
+        return None
+    
+    return (
+        torch.tensor(anchors, dtype=torch.long, device=similarity_matrix.device),
+        torch.tensor(positives, dtype=torch.long, device=similarity_matrix.device),
+        torch.tensor(negatives, dtype=torch.long, device=similarity_matrix.device),
+    )
+
+
+# -------------------------
 # Utils
 # -------------------------
 
@@ -373,105 +473,6 @@ if __name__ == "__main__":
         contrastive_pos_threshold=args.contrastive_pos_threshold,
         contrastive_neg_threshold=args.contrastive_neg_threshold,
         pretrained_encoder_path=args.pretrained_encoder,
-    )
-
-# -------------------------
-# Contrastive helpers
-# -------------------------
-
-
-def _compute_nutritional_similarity_matrix(data: HeteroData, device: torch.device) -> Tensor:
-    """
-    Build a Food x Food similarity matrix based on shared nutrients.
-    Uses the graph structure to find nutritionally similar foods.
-    """
-    if ("Food", "Contains", "Nutrient") not in data.edge_types:
-        return torch.eye(data["Food"].num_nodes, device=device)
-    
-    et = ("Food", "Contains", "Nutrient")
-    ei = data[et].edge_index
-    if ei is None or ei.numel() == 0:
-        return torch.eye(data["Food"].num_nodes, device=device)
-    
-    F = data["Food"].num_nodes
-    N = data["Nutrient"].num_nodes
-    
-    # Create binary Food x Nutrient matrix (1 if food contains nutrient, 0 otherwise)
-    food_nutrient_matrix = torch.zeros((F, N), dtype=torch.float32, device=device)
-    food_nutrient_matrix.index_put_((ei[0].to(device), ei[1].to(device)), torch.ones(ei.size(1), device=device))
-    
-    # Compute cosine similarity between foods based on shared nutrients
-    # Normalize rows
-    norms = food_nutrient_matrix.norm(dim=1, keepdim=True).clamp_min(1e-6)
-    food_nutrient_norm = food_nutrient_matrix / norms
-    
-    # Compute similarity matrix
-    similarity_matrix = torch.matmul(food_nutrient_norm, food_nutrient_norm.t())
-    
-    # Mask self-similarity
-    similarity_matrix.fill_diagonal_(0.0)
-    
-    return similarity_matrix
-
-
-def _sample_nutritional_triplets(
-    similarity_matrix: Tensor,
-    num_triplets: int,
-    pos_threshold: float = 0.5,
-    neg_threshold: float = 0.1,
-) -> Tuple[Tensor, Tensor, Tensor] | None:
-    """
-    Sample (anchor, positive, negative) indices for Food contrastive learning
-    based on nutritional similarity from the graph structure.
-    
-    Args:
-        similarity_matrix: Food x Food similarity matrix
-        num_triplets: Number of triplets to sample
-        pos_threshold: Minimum similarity for positive pairs
-        neg_threshold: Maximum similarity for negative pairs
-    """
-    F = similarity_matrix.size(0)
-    if F < 3:
-        return None
-    
-    # Find positive and negative pairs for each food
-    pos_mask = similarity_matrix >= pos_threshold
-    neg_mask = similarity_matrix <= neg_threshold
-    
-    anchors = []
-    positives = []
-    negatives = []
-    
-    # Sample triplets
-    for anchor in range(F):
-        # Find positive candidates (nutritionally similar)
-        pos_candidates = torch.where(pos_mask[anchor])[0]
-        if len(pos_candidates) == 0:
-            continue
-            
-        # Find negative candidates (nutritionally dissimilar)
-        neg_candidates = torch.where(neg_mask[anchor])[0]
-        if len(neg_candidates) == 0:
-            continue
-        
-        # Sample positive and negative
-        pos_idx = pos_candidates[torch.randint(0, len(pos_candidates), (1,))]
-        neg_idx = neg_candidates[torch.randint(0, len(neg_candidates), (1,))]
-        
-        anchors.append(anchor)
-        positives.append(pos_idx.item())
-        negatives.append(neg_idx.item())
-        
-        if len(anchors) >= num_triplets:
-            break
-    
-    if not anchors:
-        return None
-    
-    return (
-        torch.tensor(anchors, dtype=torch.long, device=similarity_matrix.device),
-        torch.tensor(positives, dtype=torch.long, device=similarity_matrix.device),
-        torch.tensor(negatives, dtype=torch.long, device=similarity_matrix.device),
     )
 
 
