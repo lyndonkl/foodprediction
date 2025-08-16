@@ -22,6 +22,7 @@ from typing import Dict, List, Tuple
 import argparse
 import json
 import math
+import os
 
 import torch
 from torch import nn, Tensor
@@ -131,6 +132,8 @@ def train(
     contrastive_triplets_per_epoch: int = 8192,
     contrastive_pos_threshold: float = 0.5,
     contrastive_neg_threshold: float = 0.1,
+    # Pretrained encoder
+    pretrained_encoder_path: str = None,
 ) -> None:
     device_t = torch.device(device)
     full_data: HeteroData = torch.load(graph_path, map_location=device_t)
@@ -158,6 +161,28 @@ def train(
     )
     device_t, rank, world_size, local_rank = ddp_setup()
     model = HeteroLinkPredModel(train_data.metadata(), cfg, supervised_edge_types=[target_edge_type], data=train_data)
+    
+    # Load pretrained encoder weights if provided
+    if pretrained_encoder_path and os.path.exists(pretrained_encoder_path):
+        if is_main_process(rank):
+            print(f"Loading pretrained encoder from {pretrained_encoder_path}")
+        checkpoint = torch.load(pretrained_encoder_path, map_location=device_t)
+        
+        # Extract only encoder weights from the pretrained model
+        pretrained_state = checkpoint["encoder_state"]
+        encoder_state = {}
+        for key, value in pretrained_state.items():
+            if key.startswith("encoder."):
+                # Remove "encoder." prefix to match our model's encoder
+                encoder_key = key[8:]  # Remove "encoder." prefix
+                encoder_state[encoder_key] = value
+        
+        # Load encoder weights into our model's encoder
+        model.encoder.load_state_dict(encoder_state, strict=False)
+        if is_main_process(rank):
+            print(f"Successfully loaded pretrained encoder weights ({len(encoder_state)} parameters)")
+            print(f"Loaded keys: {list(encoder_state.keys())[:5]}...")  # Show first 5 keys
+    
     model = ddp_wrap_model(model, device_t, world_size, local_rank)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -320,6 +345,7 @@ if __name__ == "__main__":
     parser.add_argument("--contrastive-triplets", type=int, default=8192)
     parser.add_argument("--contrastive-pos-threshold", type=float, default=0.5, help="Minimum similarity for positive pairs in contrastive learning")
     parser.add_argument("--contrastive-neg-threshold", type=float, default=0.1, help="Maximum similarity for negative pairs in contrastive learning")
+    parser.add_argument("--pretrained-encoder", type=str, default=None, help="Path to pretrained encoder weights from GraphCL pretraining")
 
     args = parser.parse_args()
 
@@ -346,6 +372,7 @@ if __name__ == "__main__":
         contrastive_triplets_per_epoch=args.contrastive_triplets,
         contrastive_pos_threshold=args.contrastive_pos_threshold,
         contrastive_neg_threshold=args.contrastive_neg_threshold,
+        pretrained_encoder_path=args.pretrained_encoder,
     )
 
 # -------------------------
