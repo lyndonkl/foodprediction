@@ -103,6 +103,24 @@ torchrun -m src.train.pretrain_graphcl \
   
 torchrun --nproc_per_node=2 -m src.train.pretrain_graphcl --graph data/hetero_graph.pt
 
+
+torchrun -m src.train.link_prediction \
+  --graph data/hetero_graph.pt \
+  --pretrained-encoder data/models/pretrain_graphcl_encoder.pt \
+  --epochs 50 \
+  --device "cpu" \
+  --lr 1e-3 \
+  --embedding-dim 128 \
+  --hidden-dim 128 \
+  --num-layers 2 \
+  --num-heads 4 \
+  --dropout 0.2 \
+  --contrastive-weight 1.0 \
+  --contrastive-margin 0.2 \
+  --contrastive-triplets 8192 \
+  --contrastive-pos-threshold 0.5 \
+  --contrastive-neg-threshold 0.1
+
 # Fine-tune
 torchrun --nproc_per_node=2 -m src.train.link_prediction --graph data/hetero_graph.pt --use-sampler
 ```
