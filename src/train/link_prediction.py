@@ -148,9 +148,26 @@ def to_device(data: HeteroData, device: torch.device) -> HeteroData:
 
 
 @torch.no_grad()
-def evaluate(model: HeteroLinkPredModel, data: HeteroData, split: str) -> Dict[str, float]:
+def evaluate(model: HeteroLinkPredModel, data: HeteroData, split: str, device: torch.device = None) -> Dict[str, float]:
     model.eval()
-    z_dict = model(data)
+    
+    # Use the same device as the model
+    if device is None:
+        device = next(model.parameters()).device
+    
+    # Extract edge attributes for model forward pass
+    edge_attr_dict = {}
+    for edge_type in data.edge_types:
+        if hasattr(data[edge_type], "edge_attr") and data[edge_type].edge_attr is not None:
+            edge_attr_dict[edge_type] = data[edge_type].edge_attr.to(device)
+    
+    # Initialize node features
+    num_nodes_by_type = {nt: data[nt].num_nodes for nt in data.node_types}
+    x_dict = model.init_node_features(num_nodes_by_type, device)
+    
+    # Get embeddings from shared encoder
+    z_dict = model(x_dict, data.edge_index_dict, edge_attr_dict)
+    
     losses: List[float] = []
     aucs: List[float] = []
 
@@ -381,7 +398,7 @@ def train(
         optimizer.step()
 
         # ---- Eval ----
-        val_metrics = evaluate(model, val_data, split="val")
+        val_metrics = evaluate(model, val_data, split="val", device=device_t)
         if is_main_process(rank):
             print(
                 f"Epoch {epoch:03d} | lp_loss {avg_lp_loss:.4f} | closs {closs_val:.4f} | "
@@ -401,7 +418,7 @@ def train(
         }, save_path)
         print(f"Saved best model to {save_path} (best val AUC={best_val_auc:.4f})")
 
-    test_metrics = evaluate(model, test_data, split="test")
+    test_metrics = evaluate(model, test_data, split="test", device=device_t)
     if is_main_process(rank):
         print(f"Test: loss {test_metrics['loss']:.4f} | auc {test_metrics['auc']:.4f}")
     ddp_cleanup()
