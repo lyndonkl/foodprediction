@@ -233,10 +233,10 @@ def train(
     weight_decay: float = 1e-4,
     negative_sampling_ratio: float = 1.0,
     device: str = "cpu",
-    embedding_dim: int = 128,
-    hidden_dim: int = 128,
-    num_layers: int = 2,
-    num_heads: int = 4,
+    embedding_dim: int = 256,
+    hidden_dim: int = 256,
+    num_layers: int = 3,
+    num_heads: int = 8,
     dropout: float = 0.2,
     save_path: str = "data/models/linkpred_gat.pt",
     # Sampler params
@@ -249,6 +249,8 @@ def train(
     contrastive_triplets_per_epoch: int = 8192,
     contrastive_pos_threshold: float = 0.5,
     contrastive_neg_threshold: float = 0.1,
+    # Loss weighting
+    link_prediction_weight: float = 2.0,
     # Pretrained encoder
     pretrained_encoder_path: str = None,
 ) -> None:
@@ -392,8 +394,8 @@ def train(
             closs_val = float('nan')
             closs = torch.tensor(0.0, device=device_t)
         
-        # Combine losses with equal weighting (both tasks contribute equally to total loss)
-        total_loss = avg_lp_loss + contrastive_weight * closs
+        # Combine losses with proper weighting
+        total_loss = link_prediction_weight * avg_lp_loss + contrastive_weight * closs
         total_loss.backward()
         optimizer.step()
 
@@ -448,10 +450,10 @@ if __name__ == "__main__":
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--neg-ratio", type=float, default=1.0, help="Negative sampling ratio")
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--embedding-dim", type=int, default=128)
-    parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--num-layers", type=int, default=2)
-    parser.add_argument("--num-heads", type=int, default=4)
+    parser.add_argument("--embedding-dim", type=int, default=256)
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--num-layers", type=int, default=3)
+    parser.add_argument("--num-heads", type=int, default=8)
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--out", type=str, default="data/models/linkpred_gat.pt")
     parser.add_argument("--use-sampler", action="store_true", help="Use LinkNeighborLoader with negative sampling")
@@ -462,6 +464,7 @@ if __name__ == "__main__":
     parser.add_argument("--contrastive-triplets", type=int, default=8192)
     parser.add_argument("--contrastive-pos-threshold", type=float, default=0.5, help="Minimum similarity for positive pairs in contrastive learning")
     parser.add_argument("--contrastive-neg-threshold", type=float, default=0.1, help="Maximum similarity for negative pairs in contrastive learning")
+    parser.add_argument("--link-prediction-weight", type=float, default=2.0, help="Weight for link prediction loss (higher = more emphasis)")
     parser.add_argument("--pretrained-encoder", type=str, default=None, help="Path to pretrained encoder weights from GraphCL pretraining")
 
     args = parser.parse_args()
@@ -489,7 +492,7 @@ if __name__ == "__main__":
         contrastive_triplets_per_epoch=args.contrastive_triplets,
         contrastive_pos_threshold=args.contrastive_pos_threshold,
         contrastive_neg_threshold=args.contrastive_neg_threshold,
+        link_prediction_weight=args.link_prediction_weight,
         pretrained_encoder_path=args.pretrained_encoder,
     )
-
 
