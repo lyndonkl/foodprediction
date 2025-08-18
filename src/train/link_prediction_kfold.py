@@ -329,7 +329,7 @@ def train_kfold(
         val_data[target_edge_type].edge_index = val_edges.t()
         
         # Use RandomLinkSplit to get negative samples for training data
-        transform = RandomLinkSplit(
+        train_transform = RandomLinkSplit(
             num_val=0.0,  # No validation split since we already split
             num_test=0.0,  # No test split since we already split
             is_undirected=False,
@@ -340,19 +340,25 @@ def train_kfold(
         )
         
         # Apply transform to get negative samples for training
-        fold_data_with_neg, _, _ = transform(fold_data)
+        fold_data_with_neg, _, _ = train_transform(fold_data)
         
-        # For validation, we can create negative samples manually or use a simpler approach
-        # Since we only need positive/negative pairs for evaluation, we can create them directly
-        val_pos_edges = val_edges
-        val_neg_edges = _generate_negative_samples(val_pos_edges, full_data[target_edge_type[0]].num_nodes, full_data[target_edge_type[2]].num_nodes, negative_sampling_ratio)
+        # Use RandomLinkSplit to get negative samples for validation data
+        val_transform = RandomLinkSplit(
+            num_val=0.0,  # No validation split since we already split
+            num_test=0.0,  # No test split since we already split
+            is_undirected=False,
+            add_negative_train_samples=True,
+            edge_types=[target_edge_type],
+            rev_edge_types=[(target_edge_type[2], f"rev_{target_edge_type[1]}", target_edge_type[0])],
+            neg_sampling_ratio=negative_sampling_ratio,
+        )
         
-        # Create validation data with both positive and negative edges
-        val_data[target_edge_type]["val_edge_label_index_pos"] = val_pos_edges.t()
-        val_data[target_edge_type]["val_edge_label_index_neg"] = val_neg_edges.t()
+        # Apply transform to get negative samples for validation
+        val_data_with_neg, _, _ = val_transform(val_data)
         
-        # Extract labels for training data
+        # Extract labels for both training and validation data
         fold_data, _, _ = attach_split_labels((fold_data_with_neg, fold_data_with_neg, fold_data_with_neg), [target_edge_type])
+        val_data, _, _ = attach_split_labels((val_data_with_neg, val_data_with_neg, val_data_with_neg), [target_edge_type])
 
         # Build model (same as original logic)
         cfg = ModelConfig(
