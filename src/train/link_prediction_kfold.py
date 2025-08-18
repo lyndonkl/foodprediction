@@ -25,15 +25,239 @@ from sklearn.model_selection import KFold
 
 from src.models.configs import ModelConfig
 from src.models.hetero_gat import HeteroLinkPredModel
-from src.train.link_prediction import (
-    _compute_nutritional_similarity_matrix,
-    _sample_nutritional_triplets,
-    to_device,
-    evaluate,
-    attach_split_labels,
-    parse_edge_types,
-)
 from .ddp_utils import ddp_setup, ddp_wrap_model, ddp_cleanup, is_main_process
+
+
+# -------------------------
+# Contrastive helpers (copied from link_prediction.py)
+# -------------------------
+
+
+def _compute_nutritional_similarity_matrix(data: HeteroData, device: torch.device) -> Tensor:
+    """
+    Build a Food x Food similarity matrix based on shared nutrients.
+    Uses the graph structure to find nutritionally similar foods.
+    """
+    if ("Food", "Contains", "Nutrient") not in data.edge_types:
+        return torch.eye(data["Food"].num_nodes, device=device)
+    
+    et = ("Food", "Contains", "Nutrient")
+    ei = data[et].edge_index
+    if ei is None or ei.numel() == 0:
+        return torch.eye(data["Food"].num_nodes, device=device)
+    
+    F = data["Food"].num_nodes
+    N = data["Nutrient"].num_nodes
+    
+    # Create binary Food x Nutrient matrix (1 if food contains nutrient, 0 otherwise)
+    food_nutrient_matrix = torch.zeros((F, N), dtype=torch.float32, device=device)
+    food_nutrient_matrix.index_put_((ei[0].to(device), ei[1].to(device)), torch.ones(ei.size(1), device=device))
+    
+    # Compute cosine similarity between foods based on shared nutrients
+    # Normalize rows
+    norms = food_nutrient_matrix.norm(dim=1, keepdim=True).clamp_min(1e-6)
+    food_nutrient_norm = food_nutrient_matrix / norms
+    
+    # Compute similarity matrix
+    similarity_matrix = torch.matmul(food_nutrient_norm, food_nutrient_norm.t())
+    
+    # Mask self-similarity
+    similarity_matrix.fill_diagonal_(0.0)
+    
+    return similarity_matrix
+
+
+def _sample_nutritional_triplets(
+    similarity_matrix: Tensor,
+    num_triplets: int,
+    pos_threshold: float = 0.5,
+    neg_threshold: float = 0.1,
+) -> Tuple[Tensor, Tensor, Tensor] | None:
+    """
+    Sample (anchor, positive, negative) indices for Food contrastive learning
+    based on nutritional similarity from the graph structure.
+    
+    Args:
+        similarity_matrix: Food x Food similarity matrix
+        num_triplets: Number of triplets to sample
+        pos_threshold: Minimum similarity for positive pairs
+        neg_threshold: Maximum similarity for negative pairs
+    """
+    F = similarity_matrix.size(0)
+    if F < 3:
+        return None
+    
+    # Find positive and negative pairs for each food
+    pos_mask = similarity_matrix >= pos_threshold
+    neg_mask = similarity_matrix <= neg_threshold
+    
+    anchors = []
+    positives = []
+    negatives = []
+    
+    # Sample triplets
+    for anchor in range(F):
+        # Find positive candidates (nutritionally similar)
+        pos_candidates = torch.where(pos_mask[anchor])[0]
+        if len(pos_candidates) == 0:
+            continue
+            
+        # Find negative candidates (nutritionally dissimilar)
+        neg_candidates = torch.where(neg_mask[anchor])[0]
+        if len(neg_candidates) == 0:
+            continue
+        
+        # Sample positive and negative
+        pos_idx = pos_candidates[torch.randint(0, len(pos_candidates), (1,))]
+        neg_idx = neg_candidates[torch.randint(0, len(neg_candidates), (1,))]
+        
+        anchors.append(anchor)
+        positives.append(pos_idx.item())
+        negatives.append(neg_idx.item())
+        
+        if len(anchors) >= num_triplets:
+            break
+    
+    if not anchors:
+        return None
+    
+    return (
+        torch.tensor(anchors, dtype=torch.long, device=similarity_matrix.device),
+        torch.tensor(positives, dtype=torch.long, device=similarity_matrix.device),
+        torch.tensor(negatives, dtype=torch.long, device=similarity_matrix.device),
+    )
+
+
+# -------------------------
+# Utils (copied from link_prediction.py)
+# -------------------------
+
+
+def _generate_negative_samples(pos_edges: Tensor, num_src_nodes: int, num_dst_nodes: int, neg_ratio: float) -> Tensor:
+    """
+    Generate negative samples for validation/testing.
+    
+    Args:
+        pos_edges: Positive edge indices [num_pos_edges, 2]
+        num_src_nodes: Number of source nodes
+        num_dst_nodes: Number of destination nodes  
+        neg_ratio: Ratio of negative to positive samples
+    
+    Returns:
+        Negative edge indices [num_neg_edges, 2]
+    """
+    num_pos = pos_edges.size(0)
+    num_neg = int(num_pos * neg_ratio)
+    
+    # Create all possible edges
+    src_nodes = torch.arange(num_src_nodes, device=pos_edges.device)
+    dst_nodes = torch.arange(num_dst_nodes, device=pos_edges.device)
+    
+    # Create positive edge set for efficient lookup
+    pos_edge_set = set((int(src), int(dst)) for src, dst in pos_edges.t())
+    
+    # Generate negative samples
+    neg_edges = []
+    attempts = 0
+    max_attempts = num_neg * 10  # Prevent infinite loops
+    
+    while len(neg_edges) < num_neg and attempts < max_attempts:
+        # Randomly sample source and destination nodes
+        src_idx = torch.randint(0, num_src_nodes, (1,)).item()
+        dst_idx = torch.randint(0, num_dst_nodes, (1,)).item()
+        
+        # Check if this edge doesn't exist in positive edges
+        if (src_idx, dst_idx) not in pos_edge_set:
+            neg_edges.append([src_idx, dst_idx])
+        
+        attempts += 1
+    
+    if len(neg_edges) < num_neg:
+        print(f"Warning: Could only generate {len(neg_edges)} negative samples out of {num_neg} requested")
+    
+    return torch.tensor(neg_edges, device=pos_edges.device, dtype=pos_edges.dtype)
+
+
+def to_device(data: HeteroData, device: torch.device) -> HeteroData:
+    return data.to(device)
+
+
+@torch.no_grad()
+def evaluate(model: HeteroLinkPredModel, data: HeteroData, split: str, device: torch.device = None) -> Dict[str, float]:
+    model.eval()
+    
+    # Use the same device as the model
+    if device is None:
+        device = next(model.parameters()).device
+    
+    # Extract edge attributes for model forward pass
+    edge_attr_dict = {}
+    for edge_type in data.edge_types:
+        if hasattr(data[edge_type], "edge_attr") and data[edge_type].edge_attr is not None:
+            edge_attr_dict[edge_type] = data[edge_type].edge_attr.to(device)
+    
+    # Initialize node features
+    num_nodes_by_type = {nt: data[nt].num_nodes for nt in data.node_types}
+    x_dict = model.init_node_features(num_nodes_by_type, device)
+    
+    # Get embeddings from shared encoder
+    z_dict = model(x_dict, data.edge_index_dict, edge_attr_dict)
+    
+    losses: List[float] = []
+    aucs: List[float] = []
+
+    try:
+        from sklearn.metrics import roc_auc_score
+    except Exception:
+        roc_auc_score = None
+
+    for edge_type in model.supervised_edge_types:
+        et_key = edge_type
+        pos_edge_label_index = data[et_key][f"{split}_edge_label_index_pos"]
+        neg_edge_label_index = data[et_key][f"{split}_edge_label_index_neg"]
+
+        pos_scores = model.predict_edge_scores(z_dict, edge_type, pos_edge_label_index)
+        neg_scores = model.predict_edge_scores(z_dict, edge_type, neg_edge_label_index)
+
+        y_pred = torch.cat([pos_scores, neg_scores], dim=0)
+        y_true = torch.cat([torch.ones_like(pos_scores), torch.zeros_like(neg_scores)], dim=0)
+
+        loss = F.binary_cross_entropy_with_logits(y_pred, y_true)
+        losses.append(loss.item())
+
+        if roc_auc_score is not None:
+            auc = float(roc_auc_score(y_true.cpu().numpy(), y_pred.detach().cpu().numpy()))
+            aucs.append(auc)
+
+    return {
+        "loss": float(sum(losses) / max(1, len(losses))),
+        "auc": float(sum(aucs) / max(1, len(aucs))) if aucs else float("nan"),
+    }
+
+
+def attach_split_labels(split_data: Tuple[HeteroData, HeteroData, HeteroData], edge_types: List[Tuple[str, str, str]]) -> Tuple[HeteroData, HeteroData, HeteroData]:
+    train_data, val_data, test_data = split_data
+
+    def _extract_labels(data: HeteroData, split_name: str):
+        for et in edge_types:
+            # RandomLinkSplit creates edge_label (binary labels) and edge_label_index (edge pairs) for each split
+            edge_label: Tensor = data[et].edge_label
+            edge_label_index: Tensor = data[et].edge_label_index
+            # Split into pos/neg by label
+            pos_mask = edge_label == 1
+            neg_mask = edge_label == 0
+            data[et][f"{split_name}_edge_label_index_pos"] = edge_label_index[:, pos_mask]
+            data[et][f"{split_name}_edge_label_index_neg"] = edge_label_index[:, neg_mask]
+
+    _extract_labels(train_data, "train")
+    _extract_labels(val_data, "val")
+    _extract_labels(test_data, "test")
+    return train_data, val_data, test_data
+
+
+# -------------------------
+# K-Fold Training
+# -------------------------
 
 
 def train_kfold(
@@ -92,19 +316,19 @@ def train_kfold(
             print(f"\n=== Training Fold {fold_idx + 1}/{n_folds} ===")
             print(f"Train samples: {len(train_idx)}, Val samples: {len(val_idx)}")
 
-        # Create fold-specific data splits using RandomLinkSplit (same as original logic)
+        # Create fold-specific data by splitting the target edge type
         train_edges = target_edges[train_idx]
         val_edges = target_edges[val_idx]
         
-        # Create fold data with train edges
+        # Create fold data with train edges only
         fold_data = full_data.clone()
         fold_data[target_edge_type].edge_index = train_edges.t()
         
-        # Create validation data with val edges
+        # Create validation data with val edges only  
         val_data = full_data.clone()
         val_data[target_edge_type].edge_index = val_edges.t()
         
-        # Use RandomLinkSplit for each fold (same as original logic)
+        # Use RandomLinkSplit to get negative samples for training data
         transform = RandomLinkSplit(
             num_val=0.0,  # No validation split since we already split
             num_test=0.0,  # No test split since we already split
@@ -115,12 +339,20 @@ def train_kfold(
             neg_sampling_ratio=negative_sampling_ratio,
         )
         
-        # Apply transform to get negative samples (same as original)
+        # Apply transform to get negative samples for training
         fold_data_with_neg, _, _ = transform(fold_data)
-        val_data_with_neg, _, _ = transform(val_data)
         
-        # Extract labels using the same logic as original
-        fold_data, val_data, _ = attach_split_labels((fold_data_with_neg, val_data_with_neg, val_data_with_neg), [target_edge_type])
+        # For validation, we can create negative samples manually or use a simpler approach
+        # Since we only need positive/negative pairs for evaluation, we can create them directly
+        val_pos_edges = val_edges
+        val_neg_edges = _generate_negative_samples(val_pos_edges, full_data[target_edge_type[0]].num_nodes, full_data[target_edge_type[2]].num_nodes, negative_sampling_ratio)
+        
+        # Create validation data with both positive and negative edges
+        val_data[target_edge_type]["val_edge_label_index_pos"] = val_pos_edges.t()
+        val_data[target_edge_type]["val_edge_label_index_neg"] = val_neg_edges.t()
+        
+        # Extract labels for training data
+        fold_data, _, _ = attach_split_labels((fold_data_with_neg, fold_data_with_neg, fold_data_with_neg), [target_edge_type])
 
         # Build model (same as original logic)
         cfg = ModelConfig(
@@ -294,6 +526,17 @@ def train_kfold(
         print(f"Saved best model to {save_path}")
 
     ddp_cleanup()
+
+
+def parse_edge_types(edge_types_strs: List[str]) -> List[Tuple[str, str, str]]:
+    parsed: List[Tuple[str, str, str]] = []
+    for s in edge_types_strs:
+        parts = [p.strip() for p in s.split(",")]
+        if len(parts) != 3:
+            raise ValueError(f"Invalid edge type string: {s}. Expected 'Src,Rel,Dst'.")
+        parsed.append((parts[0], parts[1], parts[2]))
+    return parsed
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="K-Fold Cross Validation for MTL training")
