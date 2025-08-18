@@ -25,16 +25,10 @@ class FoodOriginPredictionHead(nn.Module):
         self.difference = nn.Linear(embedding_dim, hidden_dim // 4)  # Difference features
         self.hadamard = nn.Linear(embedding_dim, hidden_dim // 4)  # Hadamard product
         
-        # Attention mechanism for feature selection
-        self.attention = nn.MultiheadAttention(
-            embed_dim=hidden_dim, 
-            num_heads=8, 
-            dropout=dropout,
-            batch_first=True
-        )
+        # Removed attention mechanism - each edge prediction is independent
         
         # Main MLP with residual connections
-        self.input_proj = nn.Linear(embedding_dim * 2 + hidden_dim // 2, hidden_dim)
+        self.input_proj = nn.Linear(embedding_dim * 2 + 1 + hidden_dim // 2, hidden_dim)
         
         # Residual blocks
         self.residual_blocks = nn.ModuleList([
@@ -55,7 +49,7 @@ class FoodOriginPredictionHead(nn.Module):
         )
         
         # Layer normalization for input features
-        self.input_norm = nn.LayerNorm(embedding_dim * 2 + hidden_dim // 2)
+        self.input_norm = nn.LayerNorm(embedding_dim * 2 + 1 + hidden_dim // 2)
     
     def forward(self, z_src: Tensor, z_dst: Tensor, edge_label_index: Tensor) -> Tensor:
         src, dst = edge_label_index
@@ -81,6 +75,7 @@ class FoodOriginPredictionHead(nn.Module):
         # Combine all interaction patterns
         combined_features = torch.cat([
             z_concat, 
+            product_score,  # Include the learned dot product score
             diff_features, 
             hadamard_features
         ], dim=-1)
@@ -91,19 +86,14 @@ class FoodOriginPredictionHead(nn.Module):
         # Project to hidden dimension
         hidden = self.input_proj(combined_features)
         
-        # Apply residual blocks with attention
+        # Apply residual blocks (removed attention - each edge prediction is independent)
         skip_connections = []
         for i, block in enumerate(self.residual_blocks):
             hidden = block(hidden)
-            if i % 2 == 0:  # Every other block, apply attention
-                # Reshape for attention (batch_size=1, seq_len=num_edges, hidden_dim)
-                hidden_reshaped = hidden.unsqueeze(0)  # [1, num_edges, hidden_dim]
-                attn_out, _ = self.attention(hidden_reshaped, hidden_reshaped, hidden_reshaped)
-                hidden = attn_out.squeeze(0)  # [num_edges, hidden_dim]
             skip_connections.append(hidden)
         
-        # Final processing with skip connections
-        final_input = torch.cat([hidden, skip_connections[-1]], dim=-1)
+        # Final processing with skip connections (combine early and late features)
+        final_input = torch.cat([hidden, skip_connections[0]], dim=-1)
         output = self.final_layers(final_input)
         
         return output.squeeze(-1)
@@ -122,7 +112,7 @@ class ResidualBlock(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout)
         )
-        self.shortcut = nn.Linear(hidden_dim, hidden_dim) if hidden_dim != hidden_dim else nn.Identity()
+        self.shortcut = nn.Identity()  # Identity mapping since input_dim == hidden_dim
     
     def forward(self, x: Tensor) -> Tensor:
         return self.layers(x) + self.shortcut(x)
