@@ -216,8 +216,8 @@ def evaluate(model: HeteroLinkPredModel, data: HeteroData, split: str, device: t
         pos_edge_label_index = data[et_key][f"{split}_edge_label_index_pos"]
         neg_edge_label_index = data[et_key][f"{split}_edge_label_index_neg"]
 
-        pos_scores = model.predict_edge_scores(z_dict, edge_type, pos_edge_label_index)
-        neg_scores = model.predict_edge_scores(z_dict, edge_type, neg_edge_label_index)
+        pos_scores = model.predict_edge_scores(z_dict, edge_type, pos_edge_label_index, data)
+        neg_scores = model.predict_edge_scores(z_dict, edge_type, neg_edge_label_index, data)
 
         y_pred = torch.cat([pos_scores, neg_scores], dim=0)
         y_true = torch.cat([torch.ones_like(pos_scores), torch.zeros_like(neg_scores)], dim=0)
@@ -289,6 +289,8 @@ def train_kfold(
     link_prediction_weight: float = 2.0,
     # Pretrained encoder
     pretrained_encoder_path: str = None,
+    # Enhanced decoder
+    use_enhanced_decoder: bool = False,
 ) -> None:
     """Train using k-fold cross validation with identical logic to link_prediction.py."""
     
@@ -369,7 +371,7 @@ def train_kfold(
             dropout=dropout,
         )
         
-        model = HeteroLinkPredModel(fold_data.metadata(), cfg, supervised_edge_types=[target_edge_type], data=fold_data)
+        model = HeteroLinkPredModel(fold_data.metadata(), cfg, supervised_edge_types=[target_edge_type], data=fold_data, use_enhanced_decoder=use_enhanced_decoder)
         
         # Load pretrained encoder weights (same as original logic)
         if pretrained_encoder_path and os.path.exists(pretrained_encoder_path):
@@ -446,15 +448,15 @@ def train_kfold(
                     batch = batch.to(device_t)
                     edge_label_index = batch[target_edge_type].edge_label_index
                     edge_label = batch[target_edge_type].edge_label
-                    scores = model.predict_edge_scores(z_dict, target_edge_type, edge_label_index)
+                    scores = model.predict_edge_scores(z_dict, target_edge_type, edge_label_index, fold_data)
                     loss = F.binary_cross_entropy_with_logits(scores, edge_label)
                     total_lp_loss += float(loss)
                     num_lp_steps += 1
             else:
                 pos_index = fold_data[target_edge_type]["train_edge_label_index_pos"]
                 neg_index = fold_data[target_edge_type]["train_edge_label_index_neg"]
-                pos_scores = model.predict_edge_scores(z_dict, target_edge_type, pos_index)
-                neg_scores = model.predict_edge_scores(z_dict, target_edge_type, neg_index)
+                pos_scores = model.predict_edge_scores(z_dict, target_edge_type, pos_index, fold_data)
+                neg_scores = model.predict_edge_scores(z_dict, target_edge_type, neg_index, fold_data)
                 y_pred = torch.cat([pos_scores, neg_scores], dim=0)
                 y_true = torch.cat([torch.ones_like(pos_scores), torch.zeros_like(neg_scores)], dim=0)
                 loss = F.binary_cross_entropy_with_logits(y_pred, y_true)
@@ -575,6 +577,7 @@ if __name__ == "__main__":
     parser.add_argument("--contrastive-neg-threshold", type=float, default=0.1)
     parser.add_argument("--link-prediction-weight", type=float, default=2.0, help="Weight for link prediction loss (higher = more emphasis)")
     parser.add_argument("--pretrained-encoder", type=str, default=None, help="Path to pretrained encoder weights")
+    parser.add_argument("--use-enhanced-decoder", action="store_true", help="Use enhanced decoder with feature attention")
 
     args = parser.parse_args()
 
@@ -604,4 +607,5 @@ if __name__ == "__main__":
         contrastive_neg_threshold=args.contrastive_neg_threshold,
         link_prediction_weight=args.link_prediction_weight,
         pretrained_encoder_path=args.pretrained_encoder,
+        use_enhanced_decoder=args.use_enhanced_decoder,
     )
