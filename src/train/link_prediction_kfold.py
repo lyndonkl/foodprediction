@@ -450,7 +450,7 @@ def train_kfold(
                     edge_label = batch[target_edge_type].edge_label
                     scores = model.predict_edge_scores(z_dict, target_edge_type, edge_label_index, fold_data)
                     loss = F.binary_cross_entropy_with_logits(scores, edge_label)
-                    total_lp_loss += float(loss)
+                    total_lp_loss += loss  # Keep as tensor, don't convert to float
                     num_lp_steps += 1
             else:
                 pos_index = fold_data[target_edge_type]["train_edge_label_index_pos"]
@@ -460,31 +460,33 @@ def train_kfold(
                 y_pred = torch.cat([pos_scores, neg_scores], dim=0)
                 y_true = torch.cat([torch.ones_like(pos_scores), torch.zeros_like(neg_scores)], dim=0)
                 loss = F.binary_cross_entropy_with_logits(y_pred, y_true)
-                total_lp_loss = float(loss)
+                total_lp_loss = loss  # Keep as tensor, don't convert to float
                 num_lp_steps = 1
 
-            avg_lp_loss = total_lp_loss / max(1, num_lp_steps)
+            avg_lp_loss = total_lp_loss / max(1, num_lp_steps)  # This is now a tensor
             
-            # Task 2: Contrastive Loss on Food embeddings (Nutritional Organization)
+            # Task 2: Contrastive Loss on Food embeddings (Nutritional Organization) - DISABLED
             # Uses nutritional similarity from graph structure to find similar/dissimilar foods
-            food_emb = z_dict["Food"]
-            triplets = _sample_nutritional_triplets(
-                nutritional_similarity, 
-                contrastive_triplets_per_epoch,
-                contrastive_pos_threshold,
-                contrastive_neg_threshold
-            )
-            if triplets is not None:
-                a, p, n = triplets
-                triplet_loss_fn = nn.TripletMarginLoss(margin=contrastive_margin, p=2)
-                closs = triplet_loss_fn(food_emb[a], food_emb[p], food_emb[n])
-                closs_val = float(closs)
-            else:
-                closs_val = float('nan')
-                closs = torch.tensor(0.0, device=device_t)
+            # food_emb = z_dict["Food"]
+            # triplets = _sample_nutritional_triplets(
+            #     nutritional_similarity, 
+            #     contrastive_triplets_per_epoch,
+            #     contrastive_pos_threshold,
+            #     contrastive_neg_threshold
+            # )
+            # if triplets is not None:
+            #     a, p, n = triplets
+            #     triplet_loss_fn = nn.TripletMarginLoss(margin=contrastive_margin, p=2)
+            #     closs = triplet_loss_fn(food_emb[a], food_emb[p], food_emb[n])
+            #     closs_val = float(closs)
+            # else:
+            #     closs_val = float('nan')
+            #     closs = torch.tensor(0.0, device=device_t)
             
-            # Combine losses with proper weighting
-            total_loss = link_prediction_weight * avg_lp_loss + contrastive_weight * closs
+            # Use only link prediction loss (contrastive learning disabled)
+            closs_val = 0.0
+            closs = torch.tensor(0.0, device=device_t)
+            total_loss = avg_lp_loss  # This is now a tensor
             total_loss.backward()
             optimizer.step()
 
